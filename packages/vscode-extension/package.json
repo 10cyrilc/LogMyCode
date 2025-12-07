@@ -24,7 +24,7 @@
       "properties": {
         "logmycode.apiUrl": {
           "type": "string",
-          "default": "http://localhost:4001",
+          "default": "https://logmycode-production.up.railway.app/api",
           "description": "Base URL for the LogMyCode API"
         },
         "logmycode.defaultUserId": {

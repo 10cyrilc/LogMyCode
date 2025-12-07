@@ -39,7 +39,44 @@ export class DailySummaryWebview {
                         this._fetchHistory(message.data);
                         return;
                     case 'copyToClipboard':
-                        vscode.env.clipboard.writeText(JSON.stringify(message.data, null, 2));
+                        const d = message.data;
+                        let text = '';
+                        
+                        if (d.summary) {
+                            text = d.summary;
+                            
+                            const lines = text.split('\n');
+                            let start = 0;
+                            for (let i = 0; i < lines.length; i++) {
+                                if (lines[i].trim().startsWith('- ')) {
+                                    start = i;
+                                    break;
+                                }
+                            }
+                            let end = lines.length;
+                            for (let i = lines.length - 1; i >= 0; i--) {
+                                if (lines[i].trim().startsWith('Total commits:')) {
+                                    end = i;
+                                    break;
+                                }
+                            }
+                            
+                             if (start < end) {
+                                text = lines.slice(start, end).join('\n').trim();
+                            }
+                            
+                        } 
+                        else if (d.repos && Array.isArray(d.repos) && d.repos.length > 0) {
+                            text = d.repos.map((r: any) => {
+                                const commits = r.commits.map((c: any) => `  • ${c.message}`).join('\n');
+                                return `- ${r.name}\n${commits}`;
+                            }).join('\n\n');
+                        } 
+                        else {
+                            text = JSON.stringify(d, null, 2);
+                        }
+                        
+                        vscode.env.clipboard.writeText(text);
                         vscode.window.showInformationMessage('Copied to clipboard!');
                         return;
                 }
@@ -135,7 +172,7 @@ export class DailySummaryWebview {
         const apiUrl = config.get<string>('apiUrl');
         
         try {
-            const response = await fetch(`${apiUrl}/api/commits`, {
+            const response = await fetch(`${apiUrl}/commits`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -360,10 +397,11 @@ export class DailySummaryWebview {
                     <div class="results-header">
                         <h2>Results</h2>
                         <div style="display: flex; gap: 8px;">
-                            <button id="copyBtn" class="secondary">Copy JSON</button>
+                            <button id="copyBtn" class="secondary">Copy Summary</button>
                             <button id="sendBtn">Send to API</button>
                         </div>
                     </div>
+                    <div id="summaryContent" class="card hidden" style="white-space: pre-wrap; font-family: var(--vscode-font-monospace); line-height: 1.5;"></div>
                     <pre id="jsonOutput"></pre>
                 </div>
             </div>
@@ -451,6 +489,15 @@ export class DailySummaryWebview {
 
                 function renderResults(data) {
                     resultsArea.classList.remove('hidden');
+                    
+                    const summaryContent = document.getElementById('summaryContent');
+                    if (data.summary) {
+                        summaryContent.classList.remove('hidden');
+                        summaryContent.textContent = data.summary;
+                    } else {
+                        summaryContent.classList.add('hidden');
+                    }
+
                     // Pretty print JSON
                     jsonOutput.textContent = JSON.stringify(data, null, 2);
                 }

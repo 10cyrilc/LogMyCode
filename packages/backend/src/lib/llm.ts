@@ -27,7 +27,7 @@ export async function generateDailySummary(
 
   const commitsText = Array.from(byRepo.entries()).map(([repoName, repoCommits]) => {
     return `Repo: ${repoName}\n` +
-      repoCommits.map(c => `- ${c.message} (Hash: ${c.hash})`).join('\n');
+      repoCommits.map(c => `- ${c.message}`).join('\n');
   }).join('\n\n');
 
   console.log(commitsText);
