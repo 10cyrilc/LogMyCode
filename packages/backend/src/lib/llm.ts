@@ -1,0 +1,78 @@
+import Groq from 'groq-sdk';
+import dotenv from 'dotenv';
+import { StoredCommit } from './db';
+
+dotenv.config();
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
+
+export async function generateDailySummary(
+  userId: string,
+  date: string,
+  commits: StoredCommit[]
+): Promise<string> {
+  if (!process.env.GROQ_API_KEY) {
+    console.warn('GROQ_API_KEY not found. Returning mock summary.');
+    return 'Error: GROQ_API_KEY not configured. Cannot generate AI summary.';
+  }
+
+  const byRepo = new Map<string, StoredCommit[]>();
+  for (const c of commits) {
+    const list = byRepo.get(c.repoName) || [];
+    list.push(c);
+    byRepo.set(c.repoName, list);
+  }
+
+  const commitsText = Array.from(byRepo.entries()).map(([repoName, repoCommits]) => {
+    return `Repo: ${repoName}\n` +
+      repoCommits.map(c => `- ${c.message} (Hash: ${c.hash})`).join('\n');
+  }).join('\n\n');
+
+  console.log(commitsText);
+
+  const prompt = `
+You are an AI assistant for a developer tool called "LogMyCode".
+Your task is to generate a daily work summary based on the following git commits for User "${userId}" on Date "${date}".
+
+Input Commits:
+${commitsText}
+
+Instructions:
+1. Group the work by repository.
+2. For each repository, summarize the changes in 3-4 concise bullet points. Focus on the "what" and "why" rather than just listing commit messages. Combine related commits.
+3. Calculate the total number of commits.
+4. Format the output EXACTLY as follows:
+
+LogMyCode – Daily Summary (${date})
+
+Repos:
+- [Repo Name]
+  • [Summary point 1]
+  • [Summary point 2]
+  ...
+- [Repo Name 2]
+  ...
+
+Total commits: [Total Count]
+
+Do not add any other text before or after this format.
+`;
+
+  try {
+    const response = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that summarizes code changes.' },
+        { role: 'user', content: prompt }
+      ],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.5,
+    });
+
+    return response.choices[0]?.message?.content || 'Failed to generate summary.';
+  } catch (error) {
+    console.error('Error calling Groq:', error);
+    return 'Error generating summary via AI.';
+  }
+}

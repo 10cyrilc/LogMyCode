@@ -1,0 +1,473 @@
+import * as vscode from 'vscode';
+import { GitService, RepoCommits } from './GitService';
+
+
+export class DailySummaryWebview {
+    public static currentPanel: DailySummaryWebview | undefined;
+    private readonly _panel: vscode.WebviewPanel;
+    private readonly _extensionUri: vscode.Uri;
+    private _disposables: vscode.Disposable[] = [];
+    private _gitService: GitService;
+
+    private _folders: string[] = [];
+
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+        this._panel = panel;
+        this._extensionUri = extensionUri;
+        this._gitService = new GitService();
+
+        this._update();
+        
+        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+        this._panel.webview.onDidReceiveMessage(
+            async message => {
+                switch (message.command) {
+                    case 'selectFolder':
+                        this._selectFolder();
+                        return;
+                    case 'clearFolders':
+                        this._folders = [];
+                         this._panel.webview.postMessage({ command: 'updateFolders', folders: this._folders });
+                        return;
+                    case 'getCommits':
+                        this._getCommits(message.data);
+                        return;
+                    case 'sendToApi':
+                        this._sendToApi(message.data);
+                        return;
+                    case 'fetchHistory':
+                        this._fetchHistory(message.data);
+                        return;
+                    case 'copyToClipboard':
+                        vscode.env.clipboard.writeText(JSON.stringify(message.data, null, 2));
+                        vscode.window.showInformationMessage('Copied to clipboard!');
+                        return;
+                }
+            },
+            null,
+            this._disposables
+        );
+    }
+
+    public static createOrShow(extensionUri: vscode.Uri) {
+        const column = vscode.window.activeTextEditor
+            ? vscode.window.activeTextEditor.viewColumn
+            : undefined;
+
+        if (DailySummaryWebview.currentPanel) {
+            DailySummaryWebview.currentPanel._panel.reveal(column);
+            return;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+            'dailySummary',
+            'Daily Summary',
+            column || vscode.ViewColumn.One,
+            {
+                enableScripts: true,
+                localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
+            }
+        );
+
+        DailySummaryWebview.currentPanel = new DailySummaryWebview(panel, extensionUri);
+    }
+
+    public dispose() {
+        DailySummaryWebview.currentPanel = undefined;
+
+        this._panel.dispose();
+
+        while (this._disposables.length) {
+            const x = this._disposables.pop();
+            if (x) {
+                x.dispose();
+            }
+        }
+    }
+
+    private async _selectFolder() {
+        const options: vscode.OpenDialogOptions = {
+            canSelectMany: true,
+            openLabel: 'Select Folder',
+            canSelectFiles: false,
+            canSelectFolders: true
+        };
+       
+        const fileUri = await vscode.window.showOpenDialog(options);
+        if (fileUri && fileUri[0]) {
+             const newPaths = fileUri.map(uri => uri.fsPath);
+             this._folders = [...new Set([...this._folders, ...newPaths])];
+             this._panel.webview.postMessage({ command: 'updateFolders', folders: this._folders });
+        }
+    }
+
+    private async _getCommits(data: { date: string; author: string, userId: string }) {
+        const { date, author, userId } = data;
+        
+        const dateObj = new Date(date);
+        const results: RepoCommits[] = [];
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Fetching commits...",
+            cancellable: false
+        }, async (progress) => {
+            for (const folder of this._folders) {
+                progress.report({ message: `Scanning ${folder}...` });
+                const result = await this._gitService.getCommitsForDay(folder, dateObj, author);
+                if (result.commits.length > 0) {
+                    results.push(result);
+                }
+            }
+        });
+
+        const responsePayload = {
+            userId: userId,
+            date: date,
+            repos: results
+        };
+
+        this._panel.webview.postMessage({ command: 'showResults', data: responsePayload });
+    }
+
+    private async _sendToApi(data: any) {
+        const config = vscode.workspace.getConfiguration('logmycode');
+        const apiUrl = config.get<string>('apiUrl');
+        
+        try {
+            const response = await fetch(`${apiUrl}/api/commits`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                vscode.window.showInformationMessage('Successfully sent to API!');
+            } else {
+                vscode.window.showErrorMessage(`Failed to send to API: ${response.statusText}`);
+            }
+        } catch (error) {
+             vscode.window.showErrorMessage(`Failed to send to API: ${error}`);
+        }
+    }
+
+    private async _fetchHistory(data: { userId: string, date: string }) {
+        const config = vscode.workspace.getConfiguration('logmycode');
+        const apiUrl = config.get<string>('apiUrl');
+        const { userId, date } = data;
+
+        const url = `${apiUrl}/daily-summary?userId=${encodeURIComponent(userId)}&date=${encodeURIComponent(date)}`;
+
+        try {
+            const response = await fetch(url);
+            if (response.ok) {
+                const json = await response.json();
+                this._panel.webview.postMessage({ command: 'showResults', data: json });
+                vscode.window.showInformationMessage('History fetched successfully!');
+            } else {
+                vscode.window.showErrorMessage('Failed to fetch history.');
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Error fetching history: ${error}`);
+        }
+    }
+
+    private _update() {
+        this._panel.webview.html = this._getHtmlForWebview();
+    }
+
+    private _getHtmlForWebview() {
+        return `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>LogMyCode</title>
+            <style>
+                :root {
+                    --container-paddding: 20px;
+                    --input-padding-vertical: 6px;
+                    --input-padding-horizontal: 4px;
+                    --input-margin-vertical: 4px;
+                    --input-margin-horizontal: 0;
+                }
+
+                body {
+                    padding: var(--container-paddding);
+                    color: var(--vscode-foreground);
+                    font-family: var(--vscode-font-family);
+                    background-color: var(--vscode-editor-background);
+                }
+
+                h1, h2, h3 {
+                    font-weight: 600;
+                }
+
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+
+                .card {
+                    background: var(--vscode-editor-background);
+                    border: 1px solid var(--vscode-widget-border);
+                    border-radius: 6px;
+                    padding: 16px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                }
+
+                .form-group {
+                    margin-bottom: 15px;
+                }
+
+                label {
+                    display: block;
+                    margin-bottom: 5px;
+                    font-weight: 500;
+                    color: var(--vscode-descriptionForeground);
+                }
+
+                input[type="text"], input[type="date"] {
+                    width: 100%;
+                    padding: 8px;
+                    border: 1px solid var(--vscode-input-border);
+                    background: var(--vscode-input-background);
+                    color: var(--vscode-input-foreground);
+                    border-radius: 4px;
+                }
+
+                button {
+                    background: var(--vscode-button-background);
+                    color: var(--vscode-button-foreground);
+                    border: none;
+                    padding: 10px 16px;
+                    cursor: pointer;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    transition: background 0.2s;
+                }
+
+                button:hover {
+                    background: var(--vscode-button-hoverBackground);
+                }
+                
+                button.secondary {
+                    background: var(--vscode-button-secondaryBackground);
+                    color: var(--vscode-button-secondaryForeground);
+                }
+                
+                button.secondary:hover {
+                    background: var(--vscode-button-secondaryHoverBackground);
+                }
+
+                .folder-list {
+                    margin-top: 10px;
+                    border: 1px solid var(--vscode-panel-border);
+                    border-radius: 4px;
+                    max-height: 150px;
+                    overflow-y: auto;
+                }
+
+                .folder-item {
+                    padding: 8px 12px;
+                    border-bottom: 1px solid var(--vscode-panel-border);
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    font-size: 0.9em;
+                }
+                
+                .folder-item:last-child {
+                    border-bottom: none;
+                }
+
+                .actions {
+                    display: flex;
+                    gap: 10px;
+                    margin-top: 20px;
+                }
+
+                pre {
+                    background: var(--vscode-textBlockQuote-background);
+                    border: 1px solid var(--vscode-textBlockQuote-border);
+                    padding: 10px;
+                    border-radius: 4px;
+                    overflow-x: auto;
+                    font-size: 0.9em;
+                }
+
+                .hidden {
+                    display: none;
+                }
+                
+                .results-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 10px;
+                }
+
+                .header-row {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header-row">
+                    <h1>LogMyCode Daily Summary</h1>
+                </div>
+
+                <div class="card">
+                    <div class="form-group">
+                        <label for="date">Date</label>
+                        <input type="date" id="date" />
+                    </div>
+                    <div class="form-group">
+                        <label for="userId">User ID</label>
+                        <input type="text" id="userId" value="alen" placeholder="e.g. alen" />
+                    </div>
+                    <div class="form-group">
+                        <label for="gitAuthor">Git Author (Optional)</label>
+                        <input type="text" id="gitAuthor" placeholder="Git Author Name (if different from User ID)" />
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Source Folders</h3>
+                    <p style="color: var(--vscode-descriptionForeground); font-size: 0.9em;">Select folders to scan for git commits.</p>
+                    <div class="folder-list" id="folderList">
+                        <div style="padding: 10px; text-align: center; color: var(--vscode-descriptionForeground);">No folders selected</div>
+                    </div>
+                    <div style="margin-top: 10px; display: flex; gap: 10px;">
+                        <button id="addFolderBtn" class="secondary">Add Folder</button>
+                        <button id="clearFoldersBtn" class="secondary">Clear All</button>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button id="getCommitsBtn">Generate Summary</button>
+                    <button id="fetchHistoryBtn" class="secondary">Fetch History from API</button>
+                </div>
+
+                <div id="resultsArea" class="hidden" style="margin-top: 30px;">
+                    <div class="results-header">
+                        <h2>Results</h2>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="copyBtn" class="secondary">Copy JSON</button>
+                            <button id="sendBtn">Send to API</button>
+                        </div>
+                    </div>
+                    <pre id="jsonOutput"></pre>
+                </div>
+            </div>
+
+            <script>
+                const vscode = acquireVsCodeApi();
+                
+                const dateInput = document.getElementById('date');
+                const userIdInput = document.getElementById('userId');
+                const gitAuthorInput = document.getElementById('gitAuthor');
+                const folderList = document.getElementById('folderList');
+                const addFolderBtn = document.getElementById('addFolderBtn');
+                const getCommitsBtn = document.getElementById('getCommitsBtn');
+                const fetchHistoryBtn = document.getElementById('fetchHistoryBtn');
+                const resultsArea = document.getElementById('resultsArea');
+                const jsonOutput = document.getElementById('jsonOutput');
+                const copyBtn = document.getElementById('copyBtn');
+                const sendBtn = document.getElementById('sendBtn');
+
+                let currentData = null;
+
+                // Set default date to today
+                dateInput.valueAsDate = new Date();
+
+                // Restore state
+                const oldState = vscode.getState() || {};
+                if (oldState.userId) userIdInput.value = oldState.userId;
+                if (oldState.gitAuthor) gitAuthorInput.value = oldState.gitAuthor;
+                            
+                            
+                addFolderBtn.addEventListener('click', () => {
+                    vscode.postMessage({ command: 'selectFolder' });
+                });
+
+                document.getElementById('clearFoldersBtn').addEventListener('click', () => {
+                    vscode.postMessage({ command: 'clearFolders' });
+                });
+
+                getCommitsBtn.addEventListener('click', () => {
+                    const date = dateInput.value;
+                    const userId = userIdInput.value;
+                    const gitAuthor = gitAuthorInput.value || userId;
+                    
+                    vscode.setState({ ...vscode.getState(), userId, gitAuthor });
+
+                    vscode.postMessage({ 
+                        command: 'getCommits', 
+                        data: { date, author: gitAuthor, userId } 
+                    });
+                });
+
+                fetchHistoryBtn.addEventListener('click', () => {
+                    const date = dateInput.value;
+                    const userId = userIdInput.value;
+                     vscode.postMessage({ 
+                        command: 'fetchHistory', 
+                        data: { date, userId } 
+                    });
+                });
+
+                copyBtn.addEventListener('click', () => {
+                   if (currentData) {
+                       vscode.postMessage({ command: 'copyToClipboard', data: currentData });
+                   }
+                });
+
+                sendBtn.addEventListener('click', () => {
+                    if (currentData) {
+                        vscode.postMessage({ command: 'sendToApi', data: currentData });
+                    }
+                });
+
+                window.addEventListener('message', event => {
+                    const message = event.data;
+                    switch (message.command) {
+                        case 'updateFolders':
+                            renderFolders(message.folders);
+                            break;
+                        case 'showResults':
+                            currentData = message.data;
+                            renderResults(message.data);
+                            break;
+                    }
+                });
+
+                function renderResults(data) {
+                    resultsArea.classList.remove('hidden');
+                    // Pretty print JSON
+                    jsonOutput.textContent = JSON.stringify(data, null, 2);
+                }
+
+                function renderFolders(folders) {
+                    if (folders.length === 0) {
+                        folderList.innerHTML = '<div style="padding: 10px; text-align: center; color: var(--vscode-descriptionForeground);">No folders selected</div>';
+                        return;
+                    }
+                    folderList.innerHTML = folders.map(f => \`
+                        <div class="folder-item">
+                            <span title="\${f}">\${f.split(/[\\\\/]/).pop()} <span style="opacity:0.5; font-size: 0.8em">(\${f})</span></span>
+                        </div>
+                    \`).join('');
+                }
+            </script>
+        </body>
+        </html>`;
+    }
+}
