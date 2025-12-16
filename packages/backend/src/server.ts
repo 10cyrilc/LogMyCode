@@ -85,7 +85,6 @@ app.post('/api/commits', async (req, res) => {
 app.get('/api/daily-summary', async (req, res) => {
   const userId = (req.query.userId as string) || '';
   const date = (req.query.date as string) || '';
-console.log(userId, date);
   if (!userId || !date) {
     return res.status(400).json({
       error: 'Missing userId or date'
@@ -136,6 +135,44 @@ console.log(userId, date);
     });
   } catch (error) {
     console.error('Error fetching summary:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/recent-summaries', async (req, res) => {
+  const userId = (req.query.userId as string) || '';
+  const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
+
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
+  }
+
+  try {
+    const today = new Date(dateStr);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    const [todaySummary, yesterdaySummary] = await Promise.all([
+      getSummary(userId, dateStr),
+      getSummary(userId, yesterdayStr)
+    ]);
+
+    return res.json({
+      userId,
+      today: {
+        date: dateStr,
+        summary: todaySummary?.summary || null,
+        totalCommits: todaySummary?.totalCommits || 0
+      },
+      yesterday: {
+        date: yesterdayStr,
+        summary: yesterdaySummary?.summary || null,
+        totalCommits: yesterdaySummary?.totalCommits || 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching recent summaries:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

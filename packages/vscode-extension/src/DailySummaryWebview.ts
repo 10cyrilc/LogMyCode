@@ -202,7 +202,7 @@ export class DailySummaryWebview {
         const apiUrl = config.get<string>('apiUrl');
         const { userId, date } = data;
 
-        const url = `${apiUrl}/daily-summary?userId=${encodeURIComponent(userId)}&date=${encodeURIComponent(date)}`;
+        const url = `${apiUrl}/recent-summaries?userId=${encodeURIComponent(userId)}&date=${encodeURIComponent(date)}`;
 
         try {
             const response = await fetch(url);
@@ -397,14 +397,14 @@ export class DailySummaryWebview {
 
                 <div class="actions">
                     <button id="getCommitsBtn">Generate Summary</button>
-                    <button id="fetchHistoryBtn" class="secondary">Fetch History from API</button>
+                    <button id="fetchHistoryBtn" class="secondary">Fetch & Format History</button>
                 </div>
 
                 <div id="resultsArea" class="hidden" style="margin-top: 30px;">
                     <div class="results-header">
                         <h2>Results</h2>
                         <div style="display: flex; gap: 8px;">
-                            <button id="copyBtn" class="secondary">Copy Summary</button>
+                            <button id="copyBtn" class="secondary">Copy Output</button>
                             <button id="sendBtn">Send to API</button>
                         </div>
                     </div>
@@ -475,7 +475,16 @@ export class DailySummaryWebview {
 
                 copyBtn.addEventListener('click', () => {
                    if (currentData) {
-                       vscode.postMessage({ command: 'copyToClipboard', data: currentData });
+                       let textToCopy = '';
+                       if (currentData.today && currentData.yesterday) {
+                           textToCopy = formatStandup(currentData);
+                       } else {
+                           // Fallback for normal summary
+                           const summaryEl = document.getElementById('summaryContent');
+                           textToCopy = summaryEl.textContent;
+                       }
+                       
+                       vscode.postMessage({ command: 'copyToClipboard', data: { summary: textToCopy } });
                    }
                 });
 
@@ -498,15 +507,79 @@ export class DailySummaryWebview {
                     }
                 });
 
+                function formatSection(summaryText, isYesterday) {
+                    if (!summaryText) return 'No data';
+                    const lines = summaryText.split('\\n');
+                    const formatted = [];
+                    
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i];
+                        const trimmed = line.trim();
+                        
+                        if (!trimmed || 
+                            trimmed.startsWith('LogMyCode') || 
+                            trimmed.startsWith('Total commits:') || 
+                            trimmed === 'Repos:') {
+                            continue;
+                        }
+
+                        // Check for bullet points
+                        // Typical format:
+                        // • RepoName
+                        //   • Item
+                        
+                        if (trimmed.startsWith('• ')) {
+                            const content = trimmed.substring(2);
+                            
+                            // Check indentation in original line to distinguish Repo vs Item
+                            if (line.startsWith('  ') || line.startsWith('\\t')) {
+                                // It's an item
+                                formatted.push('     - ' + content);
+                            } else {
+                                // It's a repo
+                                if (isYesterday) {
+                                    formatted.push('-' + content);
+                                } else {
+                                    formatted.push(content);
+                                }
+                            }
+                        } else {
+                            // Keep other lines as is, usually
+                            formatted.push(line);
+                        }
+                    }
+                    return formatted.join('\\n');
+                }
+
+                function formatStandup(data) {
+                    const yesterdaySummary = formatSection(data.yesterday.summary || '', true);
+                    const todaySummary = formatSection(data.today.summary || '', false);
+
+                    return 'Q1: What DID you work yesterday?\\n' + 
+                           yesterdaySummary + '\\n\\n' +
+                           'Q2: What ARE you working today?\\n' + 
+                           todaySummary + '\\n\\n' + 
+                           'Q3: Any BOTTLE NECK or ISSUES to complete your task?\\n' + 
+                           'No';
+                }
+
                 function renderResults(data) {
                     resultsArea.classList.remove('hidden');
-                    
                     const summaryContent = document.getElementById('summaryContent');
-                    if (data.summary) {
+                    
+                    if (data.today && data.yesterday) {
+                        // It's the history response
+                        summaryContent.classList.remove('hidden');
+                        summaryContent.textContent = formatStandup(data);
+                        sendBtn.style.display = 'none'; // Hide send btn since it's just history
+                    } else if (data.summary) {
+                         // Standard single summary
                         summaryContent.classList.remove('hidden');
                         summaryContent.textContent = data.summary;
+                        sendBtn.style.display = 'inline-block';
                     } else {
                         summaryContent.classList.add('hidden');
+                        sendBtn.style.display = 'inline-block';
                     }
 
                     // Pretty print JSON

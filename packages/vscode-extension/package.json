@@ -2,7 +2,7 @@
   "name": "logmycode",
   "displayName": "LogMyCode",
   "description": "Automatically generates daily work summaries from your git commits and exports them for standups, Excel reports, and Jira updates.",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.104.0"
   },

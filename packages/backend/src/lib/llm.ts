@@ -30,8 +30,6 @@ export async function generateDailySummary(
       repoCommits.map(c => `- ${c.message}`).join('\n');
   }).join('\n\n');
 
-  console.log(commitsText);
-
   const prompt = `
 You are an AI assistant for a developer tool called "LogMyCode".
 Your task is to generate a daily work summary based on the following git commits for User "${userId}" on Date "${date}".
@@ -41,19 +39,24 @@ ${commitsText}
 
 Instructions:
 1. Group the work by repository.
-2. For each repository, summarize the changes in 3-4 concise bullet points. Focus on the "what" and "why" rather than just listing commit messages. Combine related commits.
-3. Calculate the total number of commits.
-4. Format the output EXACTLY as follows:
+2. For each repository, summarize the changes in 3-4 concise bullet points.
+3. CRITICAL: Describe ACTIONS, not impact.
+   - Strip phrases like "resulting in...", "which allows...", "improving...", "enhancing...".
+   - Start specific points with preferred verbs: Added, Updated, Fixed, Refactored, Optimized.
+   - Do NOT explain the outcome or benefit (e.g., "to improve performance"). Just state what was done (e.g., "Optimized database queries").
+4. Combine related commits where appropriate but keep points purely action-oriented.
+5. Calculate the total number of commits.
+6. Format the output EXACTLY as follows:
 
 LogMyCode – Daily Summary (${date})
 
 Repos:
 • [Repo Name]
-  • [Summary point 1]
-  • [Summary point 2]
-  ...
+• [Summary point 1]
+• [Summary point 2]
+...
 • [Repo Name 2]
-  ...
+...
 
 Total commits: [Total Count]
 
@@ -69,7 +72,7 @@ Do not add any other text before or after this format.
       model: 'llama-3.3-70b-versatile',
       temperature: 0.5,
     });
-
+    console.log(response.choices[0]?.message?.content);
     return response.choices[0]?.message?.content || 'Failed to generate summary.';
   } catch (error) {
     console.error('Error calling Groq:', error);
