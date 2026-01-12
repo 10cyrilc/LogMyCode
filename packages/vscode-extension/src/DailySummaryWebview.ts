@@ -44,47 +44,17 @@ export class DailySummaryWebview {
                     case 'fetchHistory':
                         this._fetchHistory(message.data);
                         return;
-                    case 'copyToClipboard':
-                        const d = message.data;
-                        let text = '';
-                        
-                        if (d.summary) {
-                            text = d.summary;
-                            
-                            const lines = text.split('\n');
-                            let start = 0;
-                            for (let i = 0; i < lines.length; i++) {
-                                if (lines[i].trim().startsWith('- ')) {
-                                    start = i;
-                                    break;
-                                }
-                            }
-                            let end = lines.length;
-                            for (let i = lines.length - 1; i >= 0; i--) {
-                                if (lines[i].trim().startsWith('Total commits:')) {
-                                    end = i;
-                                    break;
-                                }
-                            }
-                            
-                             if (start < end) {
-                                text = lines.slice(start, end).join('\n').trim();
-                            }
-                            
-                        } 
-                        else if (d.repos && Array.isArray(d.repos) && d.repos.length > 0) {
-                            text = d.repos.map((r: any) => {
-                                const commits = r.commits.map((c: any) => `  • ${c.message}`).join('\n');
-                                return `- ${r.name}\n${commits}`;
-                            }).join('\n\n');
-                        } 
-                        else {
-                            text = JSON.stringify(d, null, 2);
+                    case 'copyToClipboard': {
+                        const { text } = message.data;
+                        if (!text) {
+                            vscode.window.showErrorMessage('Nothing to copy.');
+                            return;
                         }
-                        
+
                         vscode.env.clipboard.writeText(text);
                         vscode.window.showInformationMessage('Copied to clipboard!');
                         return;
+                    }
                 }
             },
             null,
@@ -108,7 +78,9 @@ export class DailySummaryWebview {
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')]
+                localResourceRoots: [
+                    vscode.Uri.joinPath(context.extensionUri, 'src')
+                ]
             }
         );
 
@@ -223,6 +195,10 @@ export class DailySummaryWebview {
     }
 
     private _getHtmlForWebview() {
+        const scriptUri = this._panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'src', 'script.js')
+        );
+
         return `<!DOCTYPE html>
         <html lang="en">
         <head>
@@ -414,190 +390,9 @@ export class DailySummaryWebview {
             </div>
 
             <script>
-                const vscode = acquireVsCodeApi();
-                
-                const dateInput = document.getElementById('date');
-                const userIdInput = document.getElementById('userId');
-                const gitAuthorInput = document.getElementById('gitAuthor');
-                const folderList = document.getElementById('folderList');
-                const addFolderBtn = document.getElementById('addFolderBtn');
-                const getCommitsBtn = document.getElementById('getCommitsBtn');
-                const fetchHistoryBtn = document.getElementById('fetchHistoryBtn');
-                const resultsArea = document.getElementById('resultsArea');
-                const jsonOutput = document.getElementById('jsonOutput');
-                const copyBtn = document.getElementById('copyBtn');
-                const sendBtn = document.getElementById('sendBtn');
-
-                let currentData = null;
-
-                // Set default date to today
-                dateInput.valueAsDate = new Date();
-
-                // Restore state
-                const oldState = vscode.getState() || {};
-                if (oldState.userId) userIdInput.value = oldState.userId;
-                if (oldState.gitAuthor) gitAuthorInput.value = oldState.gitAuthor;
-                            
-                            
-                addFolderBtn.addEventListener('click', () => {
-                    vscode.postMessage({ command: 'selectFolder' });
-                });
-
-                // Initialize with saved folders
-                const initialFolders = ${JSON.stringify(this._folders)};
-                renderFolders(initialFolders);
-
-                document.getElementById('clearFoldersBtn').addEventListener('click', () => {
-                    vscode.postMessage({ command: 'clearFolders' });
-                });
-
-                getCommitsBtn.addEventListener('click', () => {
-                    const date = dateInput.value;
-                    const userId = userIdInput.value;
-                    const gitAuthor = gitAuthorInput.value || userId;
-                    
-                    vscode.setState({ ...vscode.getState(), userId, gitAuthor });
-
-                    vscode.postMessage({ 
-                        command: 'getCommits', 
-                        data: { date, author: gitAuthor, userId } 
-                    });
-                });
-
-                fetchHistoryBtn.addEventListener('click', () => {
-                    const date = dateInput.value;
-                    const userId = userIdInput.value;
-                     vscode.postMessage({ 
-                        command: 'fetchHistory', 
-                        data: { date, userId } 
-                    });
-                });
-
-                copyBtn.addEventListener('click', () => {
-                   if (currentData) {
-                       let textToCopy = '';
-                       if (currentData.today && currentData.yesterday) {
-                           textToCopy = formatStandup(currentData);
-                       } else {
-                           // Fallback for normal summary
-                           const summaryEl = document.getElementById('summaryContent');
-                           textToCopy = summaryEl.textContent;
-                       }
-                       
-                       vscode.postMessage({ command: 'copyToClipboard', data: { summary: textToCopy } });
-                   }
-                });
-
-                sendBtn.addEventListener('click', () => {
-                    if (currentData) {
-                        vscode.postMessage({ command: 'sendToApi', data: currentData });
-                    }
-                });
-
-                window.addEventListener('message', event => {
-                    const message = event.data;
-                    switch (message.command) {
-                        case 'updateFolders':
-                            renderFolders(message.folders);
-                            break;
-                        case 'showResults':
-                            currentData = message.data;
-                            renderResults(message.data);
-                            break;
-                    }
-                });
-
-                function formatSection(summaryText, isYesterday) {
-                    if (!summaryText) return 'No data';
-                    const lines = summaryText.split('\\n');
-                    const formatted = [];
-                    
-                    for (let i = 0; i < lines.length; i++) {
-                        const line = lines[i];
-                        const trimmed = line.trim();
-                        
-                        if (!trimmed || 
-                            trimmed.startsWith('LogMyCode') || 
-                            trimmed.startsWith('Total commits:') || 
-                            trimmed === 'Repos:') {
-                            continue;
-                        }
-
-                        // Check for bullet points
-                        // Typical format:
-                        // • RepoName
-                        //   • Item
-                        
-                        if (trimmed.startsWith('• ')) {
-                            const content = trimmed.substring(2);
-                            
-                            // Check indentation in original line to distinguish Repo vs Item
-                            if (line.startsWith('  ') || line.startsWith('\\t')) {
-                                // It's an item
-                                formatted.push('     - ' + content);
-                            } else {
-                                // It's a repo
-                                if (isYesterday) {
-                                    formatted.push('-' + content);
-                                } else {
-                                    formatted.push(content);
-                                }
-                            }
-                        } else {
-                            // Keep other lines as is, usually
-                            formatted.push(line);
-                        }
-                    }
-                    return formatted.join('\\n');
-                }
-
-                function formatStandup(data) {
-                    const yesterdaySummary = formatSection(data.yesterday.summary || '', true);
-                    const todaySummary = formatSection(data.today.summary || '', false);
-
-                    return 'Q1: What DID you work yesterday?\\n' + 
-                           yesterdaySummary + '\\n\\n' +
-                           'Q2: What ARE you working today?\\n' + 
-                           todaySummary + '\\n\\n' + 
-                           'Q3: Any BOTTLE NECK or ISSUES to complete your task?\\n' + 
-                           'No';
-                }
-
-                function renderResults(data) {
-                    resultsArea.classList.remove('hidden');
-                    const summaryContent = document.getElementById('summaryContent');
-                    
-                    if (data.today && data.yesterday) {
-                        // It's the history response
-                        summaryContent.classList.remove('hidden');
-                        summaryContent.textContent = formatStandup(data);
-                        sendBtn.style.display = 'none'; // Hide send btn since it's just history
-                    } else if (data.summary) {
-                         // Standard single summary
-                        summaryContent.classList.remove('hidden');
-                        summaryContent.textContent = data.summary;
-                        sendBtn.style.display = 'inline-block';
-                    } else {
-                        summaryContent.classList.add('hidden');
-                        sendBtn.style.display = 'inline-block';
-                    }
-
-                    // Pretty print JSON
-                    jsonOutput.textContent = JSON.stringify(data, null, 2);
-                }
-
-                function renderFolders(folders) {
-                    if (folders.length === 0) {
-                        folderList.innerHTML = '<div style="padding: 10px; text-align: center; color: var(--vscode-descriptionForeground);">No folders selected</div>';
-                        return;
-                    }
-                    folderList.innerHTML = folders.map(f => \`
-                        <div class="folder-item">
-                            <span title="\${f}">\${f.split(/[\\\\/]/).pop()} <span style="opacity:0.5; font-size: 0.8em">(\${f})</span></span>
-                        </div>
-                    \`).join('');
-                }
+                window.initialFolders = ${JSON.stringify(this._folders)};
             </script>
+            <script src="${scriptUri}"></script>
         </body>
         </html>`;
     }
