@@ -196,7 +196,7 @@ export class DailySummaryWebview {
 
     private _getHtmlForWebview() {
         const scriptUri = this._panel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'src', 'script.js')
+            vscode.Uri.joinPath(this._extensionUri, 'dist', 'script.js')
         );
 
         return `<!DOCTYPE html>
