@@ -79,7 +79,7 @@ export class DailySummaryWebview {
             {
                 enableScripts: true,
                 localResourceRoots: [
-                    vscode.Uri.joinPath(context.extensionUri, 'src')
+                    vscode.Uri.joinPath(context.extensionUri, 'dist')
                 ]
             }
         );
