@@ -27,12 +27,6 @@ This extension contributes the following settings:
 * `logmycode.apiUrl`: The base URL for the LogMyCode API (default: `http://localhost:4001`).
 * `logmycode.defaultUserId`: The default User ID to pre-fill in the dashboard (default: `alen`).
 
-### Command line usage:
-
-```bash
-npx @vscode/vsce package --no-dependencies
-```
-
 ## Requirements
 
 - `git` must be installed and available in your system's PATH.
