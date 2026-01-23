@@ -1,218 +1,209 @@
 import * as vscode from 'vscode';
 import { GitService, RepoCommits } from './GitService';
 
-
 export class DailySummaryWebview {
-    public static currentPanel: DailySummaryWebview | undefined;
-    private readonly _panel: vscode.WebviewPanel;
-    private readonly _extensionUri: vscode.Uri;
-    private _disposables: vscode.Disposable[] = [];
-    private _gitService: GitService;
-    private _context: vscode.ExtensionContext;
+  public static currentPanel: DailySummaryWebview | undefined;
+  private readonly _panel: vscode.WebviewPanel;
+  private readonly _extensionUri: vscode.Uri;
+  private _disposables: vscode.Disposable[] = [];
+  private _gitService: GitService;
+  private _context: vscode.ExtensionContext;
 
-    private _folders: string[] = [];
+  private _folders: string[] = [];
 
-    private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
-        this._panel = panel;
-        this._extensionUri = context.extensionUri;
-        this._context = context;
-        this._gitService = new GitService();
-        
-        this._folders = this._context.globalState.get<string[]>('dailySummary.folders') || [];
+  private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
+    this._panel = panel;
+    this._extensionUri = context.extensionUri;
+    this._context = context;
+    this._gitService = new GitService();
 
+    this._folders = this._context.globalState.get<string[]>('dailySummary.folders') || [];
 
-        this._update();
-        
-        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
-        this._panel.webview.onDidReceiveMessage(
-            async message => {
-                switch (message.command) {
-                    case 'selectFolder':
-                        this._selectFolder();
-                        return;
-                    case 'clearFolders':
-                        this._folders = [];
-                         this._context.globalState.update('dailySummary.folders', []);
-                         this._panel.webview.postMessage({ command: 'updateFolders', folders: this._folders });
-                        return;
-                    case 'getCommits':
-                        this._getCommits(message.data);
-                        return;
-                    case 'sendToApi':
-                        this._sendToApi(message.data);
-                        return;
-                    case 'fetchHistory':
-                        this._fetchHistory(message.data);
-                        return;
-                    case 'copyToClipboard': {
-                        const { text } = message.data;
-                        if (!text) {
-                            vscode.window.showErrorMessage('Nothing to copy.');
-                            return;
-                        }
+    this._update();
 
-                        vscode.env.clipboard.writeText(text);
-                        vscode.window.showInformationMessage('Copied to clipboard!');
-                        return;
-                    }
-                }
-            },
-            null,
-            this._disposables
-        );
-    }
-
-    public static createOrShow(context: vscode.ExtensionContext) {
-        const column = vscode.window.activeTextEditor
-            ? vscode.window.activeTextEditor.viewColumn
-            : undefined;
-
-        if (DailySummaryWebview.currentPanel) {
-            DailySummaryWebview.currentPanel._panel.reveal(column);
+    this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+    this._panel.webview.onDidReceiveMessage(
+      async (message) => {
+        switch (message.command) {
+          case 'selectFolder':
+            this._selectFolder();
             return;
-        }
-
-        const panel = vscode.window.createWebviewPanel(
-            'dailySummary',
-            'Daily Summary',
-            column || vscode.ViewColumn.One,
-            {
-                enableScripts: true,
-                localResourceRoots: [
-                    vscode.Uri.joinPath(context.extensionUri, 'dist')
-                ]
-            }
-        );
-
-        DailySummaryWebview.currentPanel = new DailySummaryWebview(panel, context);
-    }
-
-    public dispose() {
-        DailySummaryWebview.currentPanel = undefined;
-
-        this._panel.dispose();
-
-        while (this._disposables.length) {
-            const x = this._disposables.pop();
-            if (x) {
-                x.dispose();
-            }
-        }
-    }
-
-    private async _selectFolder() {
-        const options: vscode.OpenDialogOptions = {
-            canSelectMany: true,
-            openLabel: 'Select Folder',
-            canSelectFiles: false,
-            canSelectFolders: true
-        };
-       
-        const fileUri = await vscode.window.showOpenDialog(options);
-        if (fileUri && fileUri[0]) {
-             const newPaths = fileUri.map(uri => uri.fsPath);
-             this._folders = [...new Set([...this._folders, ...newPaths])];
-             await this._context.globalState.update('dailySummary.folders', this._folders);
-             this._panel.webview.postMessage({ command: 'updateFolders', folders: this._folders });
-        }
-    }
-
-    private async _getCommits(data: { date: string; author: string, userId: string }) {
-        const { date, author, userId } = data;
-        
-        const dateObj = new Date(date);
-        const results: RepoCommits[] = [];
-
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: "Fetching commits...",
-            cancellable: false
-        }, async (progress) => {
-            for (const folder of this._folders) {
-                progress.report({ message: `Scanning ${folder}...` });
-                const result = await this._gitService.getCommitsForDay(folder, dateObj, author);
-                if (result.commits.length > 0) {
-                    results.push(result);
-                }
-            }
-            if (results.length === 0) {
-                vscode.window.showInformationMessage(`No commits found for ${date}.`);
-                return;
+          case 'clearFolders':
+            this._folders = [];
+            this._context.globalState.update('dailySummary.folders', []);
+            this._panel.webview.postMessage({ command: 'updateFolders', folders: this._folders });
+            return;
+          case 'getCommits':
+            this._getCommits(message.data);
+            return;
+          case 'sendToApi':
+            this._sendToApi(message.data);
+            return;
+          case 'fetchHistory':
+            this._fetchHistory(message.data);
+            return;
+          case 'copyToClipboard': {
+            const { text } = message.data;
+            if (!text) {
+              vscode.window.showErrorMessage('Nothing to copy.');
+              return;
             }
 
-            const responsePayload = {
-                userId: userId,
-                date: date,
-                repos: results
-            };
-    
-            // Automatically send to API to generate summary
-            await this._sendToApi(responsePayload);
-        });
-    }
-
-    private async _sendToApi(data: any) {
-        const config = vscode.workspace.getConfiguration('logmycode');
-        const apiUrl = config.get<string>('apiUrl');
-        
-        try {
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: "Generating summary...",
-                cancellable: false
-            }, async () => {
-                const response = await fetch(`${apiUrl}/commits`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(data)
-                });
-
-                if (response.ok) {
-                    const json = await response.json();
-                    this._panel.webview.postMessage({ command: 'showResults', data: json });
-                    vscode.window.showInformationMessage('Summary generated successfully!');
-                } else {
-                    vscode.window.showErrorMessage(`Failed to generate summary: ${response.statusText}`);
-                }
-            });
-        } catch (error) {
-             vscode.window.showErrorMessage(`Failed to connect to API: ${error}`);
+            vscode.env.clipboard.writeText(text);
+            vscode.window.showInformationMessage('Copied to clipboard!');
+            return;
+          }
         }
+      },
+      null,
+      this._disposables
+    );
+  }
+
+  public static createOrShow(context: vscode.ExtensionContext) {
+    const column = vscode.window.activeTextEditor
+      ? vscode.window.activeTextEditor.viewColumn
+      : undefined;
+
+    if (DailySummaryWebview.currentPanel) {
+      DailySummaryWebview.currentPanel._panel.reveal(column);
+      return;
     }
 
-    private async _fetchHistory(data: { userId: string, date: string }) {
-        const config = vscode.workspace.getConfiguration('logmycode');
-        const apiUrl = config.get<string>('apiUrl');
-        const { userId, date } = data;
+    const panel = vscode.window.createWebviewPanel(
+      'dailySummary',
+      'Daily Summary',
+      column || vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist')],
+      }
+    );
 
-        const url = `${apiUrl}/recent-summaries?userId=${encodeURIComponent(userId)}&date=${encodeURIComponent(date)}`;
+    DailySummaryWebview.currentPanel = new DailySummaryWebview(panel, context);
+  }
 
-        try {
-            const response = await fetch(url);
-            if (response.ok) {
-                const json = await response.json();
-                this._panel.webview.postMessage({ command: 'showResults', data: json });
-                vscode.window.showInformationMessage('History fetched successfully!');
-            } else {
-                vscode.window.showErrorMessage('Failed to fetch history.');
-            }
-        } catch (error) {
-            vscode.window.showErrorMessage(`Error fetching history: ${error}`);
+  public dispose() {
+    DailySummaryWebview.currentPanel = undefined;
+
+    this._panel.dispose();
+
+    while (this._disposables.length) {
+      const x = this._disposables.pop();
+      if (x) {
+        x.dispose();
+      }
+    }
+  }
+
+  private async _selectFolder() {
+    const options: vscode.OpenDialogOptions = {
+      canSelectMany: true,
+      openLabel: 'Select Folder',
+      canSelectFiles: false,
+      canSelectFolders: true,
+    };
+
+    const fileUri = await vscode.window.showOpenDialog(options);
+    if (fileUri && fileUri[0]) {
+      const newPaths = fileUri.map((uri) => uri.fsPath);
+      this._folders = [...new Set([...this._folders, ...newPaths])];
+      await this._context.globalState.update('dailySummary.folders', this._folders);
+      this._panel.webview.postMessage({ command: 'updateFolders', folders: this._folders });
+    }
+  }
+
+  private async _getCommits(data: { date: string; author: string; userId: string }) {
+    const { date, author, userId } = data;
+
+    const dateObj = new Date(date);
+    const results: RepoCommits[] = [];
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Fetching commits...',
+        cancellable: false,
+      },
+      async (progress) => {
+        for (const folder of this._folders) {
+          progress.report({ message: `Scanning ${folder}...` });
+          const result = await this._gitService.getCommitsForDay(folder, dateObj, author);
+          if (result.commits.length > 0) {
+            results.push(result);
+          }
         }
+      }
+    );
+
+    const responsePayload = {
+      userId: userId,
+      date: date,
+      repos: results,
+    };
+
+    this._panel.webview.postMessage({ command: 'showResults', data: responsePayload });
+  }
+
+  private async _sendToApi(data: {
+    userId: string;
+    date: string;
+    summary?: string;
+    repos?: unknown[];
+  }) {
+    const config = vscode.workspace.getConfiguration('logmycode');
+    const apiUrl = config.get<string>('apiUrl');
+
+    try {
+      const response = await fetch(`${apiUrl}/commits`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (response.ok) {
+        vscode.window.showInformationMessage('Successfully sent to API!');
+      } else {
+        vscode.window.showErrorMessage(`Failed to send to API: ${response.statusText}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to send to API: ${error}`);
     }
+  }
 
-    private _update() {
-        this._panel.webview.html = this._getHtmlForWebview();
+  private async _fetchHistory(data: { userId: string; date: string }) {
+    const config = vscode.workspace.getConfiguration('logmycode');
+    const apiUrl = config.get<string>('apiUrl');
+    const { userId, date } = data;
+
+    const url = `${apiUrl}/recent-summaries?userId=${encodeURIComponent(userId)}&date=${encodeURIComponent(date)}`;
+
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        const json = await response.json();
+        this._panel.webview.postMessage({ command: 'showResults', data: json });
+        vscode.window.showInformationMessage('History fetched successfully!');
+      } else {
+        vscode.window.showErrorMessage('Failed to fetch history.');
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error fetching history: ${error}`);
     }
+  }
 
-    private _getHtmlForWebview() {
-        const scriptUri = this._panel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'dist', 'script.js')
-        );
+  private _update() {
+    this._panel.webview.html = this._getHtmlForWebview();
+  }
 
-        return `<!DOCTYPE html>
+  private _getHtmlForWebview() {
+    const scriptUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'dist', 'script.js')
+    );
+
+    return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
@@ -418,5 +409,5 @@ export class DailySummaryWebview {
             <script src="${scriptUri}"></script>
         </body>
         </html>`;
-    }
+  }
 }
