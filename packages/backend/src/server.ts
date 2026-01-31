@@ -12,7 +12,7 @@ import {
 import { generateDailySummary } from './lib/llm';
 
 const app = express();
-const PORT = process.env.PORT || 4001;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4001;
 
 app.use(express.json());
 
@@ -190,6 +190,6 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT,"0.0.0.0",() => {
   console.log(`LogMyCode backend listening on port ${PORT}`);
 });
