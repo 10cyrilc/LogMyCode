@@ -24,7 +24,7 @@ yarn-error.log*
 Thumbs.db
 
 # Editor settings
-.vscode
+
 .idea
 *.swp
 
