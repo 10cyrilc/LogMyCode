@@ -41,7 +41,6 @@ ${commitsText}
 `;
 
   const defaultFormat = `
-Repos:    
 • [Repo Name]
   - [Summary point 1]
   - [Summary point 2]
@@ -78,7 +77,11 @@ Do not add any other text before or after this format.
   try {
     const response = await groq.chat.completions.create({
       messages: [
-        { role: 'system', content: 'You are a helpful assistant that summarizes code changes.' },
+        {
+          role: 'system',
+          content:
+            'You are a strict reporting bot. You generate daily work summaries. You MUST ONLY output the summary in the requested format. Do NOT add greetings, introductions, or closing remarks. Do NOT say "Here is a daily work summary" or "Let me know if you need any further assistance or details!".',
+        },
         { role: 'user', content: prompt },
       ],
       model: 'llama-3.3-70b-versatile',

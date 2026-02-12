@@ -100,9 +100,38 @@
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
       if (summaryContent.textContent) {
+        const lines = summaryContent.textContent.split('\n');
+        let validLines = lines;
+
+        // 1. Find Start: Look for "LogMyCode – Daily Summary"
+        const startIndex = lines.findIndex((l) => l.trim().startsWith('LogMyCode – Daily Summary'));
+        if (startIndex !== -1) {
+          validLines = lines.slice(startIndex + 1);
+        } else {
+          // Fallback: if we can't find the header, assume standard format and remove first line
+          if (validLines.length > 0) {
+            validLines = validLines.slice(1);
+          }
+        }
+
+        // 2. Find End: Look for "Total commits:" from the end
+        let endIndex = -1;
+        for (let i = validLines.length - 1; i >= 0; i--) {
+          if (validLines[i].trim().startsWith('Total commits:')) {
+            endIndex = i;
+            break;
+          }
+        }
+
+        if (endIndex !== -1) {
+          validLines = validLines.slice(0, endIndex);
+        }
+
+        const textToCopy = validLines.join('\n').trim();
+
         vscode.postMessage({
           command: 'copyToClipboard',
-          data: { text: summaryContent.textContent },
+          data: { text: textToCopy },
         });
         showStatus('Copied to clipboard', 'success');
       }

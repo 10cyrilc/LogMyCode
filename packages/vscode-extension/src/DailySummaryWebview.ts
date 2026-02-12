@@ -11,7 +11,7 @@ export class DailySummaryWebview {
 
   private _folders: string[] = [];
   private _defaultGitAuthor: string = '';
-  private readonly _summaryTemplate = `Repos:    
+  private readonly _summaryTemplate = `    
 • [Repo Name]
   - [Summary point 1]
   - [Summary point 2]
@@ -222,6 +222,7 @@ export class DailySummaryWebview {
     repos?: unknown[];
     template?: string;
   }) {
+    console.log('template', data.template);
     const config = vscode.workspace.getConfiguration('logmycode');
     const apiUrl = config.get<string>('apiUrl');
 
@@ -550,8 +551,8 @@ button.primary {
       </div>
 
       <div class="form-group">
-        <label>Output Format</label>
-        <textarea id="template" rows="6">${this._summaryTemplate}</textarea>
+        <label>Style Instructions</label>
+        <textarea id="template" rows="10" placeholder="e.g. Concise, professional tone...">${this._summaryTemplate}</textarea>
       </div>
     </div>
 
